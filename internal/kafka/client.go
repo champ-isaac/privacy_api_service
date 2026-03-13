@@ -2,7 +2,8 @@ package kafka
 
 import (
 	"context"
-	"log"
+
+	"github.com/champ-isaac/privacy_api_service/pkgs/log"
 )
 
 type Client struct {
@@ -13,6 +14,7 @@ func New(ctx context.Context) *Client {
 }
 
 func (c *Client) Consume(ctx context.Context, sourceChan, rawMsgChan chan string) error {
+	logger := log.LoggerFrom(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -21,12 +23,19 @@ func (c *Client) Consume(ctx context.Context, sourceChan, rawMsgChan chan string
 			if !ok {
 				return nil
 			}
-			rawMsgChan <- c.consumeMsg(msg)
+			logger.Info("<-sourceChan", "msg", msg)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case rawMsgChan <- c.consumeMsg(ctx, msg):
+				logger.Info("rawMsgChan<-", "msg", msg)
+			}
 		}
 	}
 }
 
 func (c *Client) Produce(ctx context.Context, transformedMsgChan, resultChan chan string) error {
+	logger := log.LoggerFrom(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -35,7 +44,13 @@ func (c *Client) Produce(ctx context.Context, transformedMsgChan, resultChan cha
 			if !ok {
 				return nil
 			}
-			resultChan <- c.produceMsg(msg)
+			logger.Info("<-transformedMsgChan", "msg", msg)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case resultChan <- c.produceMsg(ctx, msg):
+				logger.Info("resultChan<-", "msg", msg)
+			}
 		}
 	}
 }
@@ -44,12 +59,14 @@ func (c *Client) Close() error {
 	return nil
 }
 
-func (c *Client) consumeMsg(msg string) string {
-	log.Printf("consume raw message %s", msg)
+func (c *Client) consumeMsg(ctx context.Context, msg string) string {
+	//logger := log.LoggerFrom(ctx)
+	//logger.Info("consume raw message", "msg", msg, "rawMsgChan", "<-")
 	return msg
 }
 
-func (c *Client) produceMsg(msg string) string {
-	log.Printf("produce transformed message %s", msg)
+func (c *Client) produceMsg(ctx context.Context, msg string) string {
+	//logger := log.LoggerFrom(ctx)
+	//logger.Info("produce transformed message", "msg", msg, "resultChan", "<-")
 	return msg
 }

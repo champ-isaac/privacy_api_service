@@ -2,7 +2,8 @@ package transform
 
 import (
 	"context"
-	"log"
+
+	"github.com/champ-isaac/privacy_api_service/pkgs/log"
 )
 
 type Client struct {
@@ -13,6 +14,7 @@ func New(ctx context.Context) *Client {
 }
 
 func (c *Client) Encode(ctx context.Context, rawMsgChan, cacheInChan, cacheOutChan, transformedMsgChan chan string) error {
+	logger := log.LoggerFrom(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -21,25 +23,36 @@ func (c *Client) Encode(ctx context.Context, rawMsgChan, cacheInChan, cacheOutCh
 			if !ok {
 				return nil
 			}
-			log.Printf("received raw message: %s", msg)
-			cacheInChan <- msg
+			logger.Info("<-rawMsgChan", "msg", msg)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case cacheInChan <- msg:
+				logger.Info("cacheInChan<-", "msg", msg)
+			}
 		case msg, ok := <-cacheOutChan:
 			if !ok {
 				return nil
 			}
-			log.Printf("received cacheOut cached message: %s", msg)
-			transformedMsg, err := c.transform(msg)
+			logger.Info("<-cacheOutChan", "msg", msg)
+			transformedMsg, err := c.transform(ctx, msg)
 			if err != nil {
 				return err
 			}
-			transformedMsgChan <- transformedMsg
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case transformedMsgChan <- transformedMsg:
+				logger.Info("transformedMsgChan<-", "msg", msg)
+			}
 		}
 	}
 }
 
-func (c *Client) transform(msg string) (string, error) {
+func (c *Client) transform(ctx context.Context, msg string) (string, error) {
+	//logger := log.LoggerFrom(ctx)
 	transformedMsg := msg
-	log.Printf("transformed message: %s", transformedMsg)
+	//logger.Info("transformed message", "msg", transformedMsg)
 	return transformedMsg, nil
 }
 

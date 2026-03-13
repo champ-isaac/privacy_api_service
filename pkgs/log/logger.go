@@ -16,7 +16,7 @@ var (
 
 func init() {
 	jsonHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		AddSource: true,
+		AddSource: false,
 		Level:     logLevel,
 	})
 	defaultLogger = slog.New(jsonHandler)
@@ -25,7 +25,7 @@ func init() {
 
 func InitLogger(level slog.Level) *slog.Logger {
 	jsonHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		AddSource: true,
+		AddSource: false,
 		Level:     level,
 	})
 	logger := slog.New(jsonHandler)

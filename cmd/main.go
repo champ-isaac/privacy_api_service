@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,6 +12,7 @@ import (
 	"github.com/champ-isaac/privacy_api_service/internal/kafka"
 	"github.com/champ-isaac/privacy_api_service/internal/redis"
 	"github.com/champ-isaac/privacy_api_service/internal/transform"
+	"github.com/champ-isaac/privacy_api_service/pkgs/log"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -20,6 +21,8 @@ func main() {
 	defer cancel()
 
 	g, ctx := errgroup.WithContext(ctx)
+	logger := log.LoggerFrom(ctx)
+	log.SetLogLevel(slog.LevelDebug)
 
 	//initialize channels
 	sourceChan := make(chan string)
@@ -37,23 +40,28 @@ func main() {
 
 	//build pipelines
 	g.Go(func() error {
-		generator(sourceChan)
-		return nil
+		defer close(sourceChan)
+		return generator(ctx, sourceChan)
 	})
 
 	g.Go(func() error {
+		defer close(rawMsgChan)
 		return kafkaClient.Consume(ctx, sourceChan, rawMsgChan)
 	})
 
 	g.Go(func() error {
+		defer close(cacheOutChan)
+		defer close(cacheInChan)
 		return redisClient.Service(ctx, cacheInChan, cacheOutChan)
 	})
 
 	g.Go(func() error {
+		defer close(transformedMsgChan)
 		return transformClient.Encode(ctx, rawMsgChan, cacheInChan, cacheOutChan, transformedMsgChan)
 	})
 
 	g.Go(func() error {
+		defer close(resultChan)
 		return kafkaClient.Produce(ctx, transformedMsgChan, resultChan)
 	})
 
@@ -64,16 +72,10 @@ func main() {
 	go func() {
 		signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
 
-		<-signalChan
-		cancel()
+		sigMsg := <-signalChan
+		logger.Info("received signal message", "sigMsg", sigMsg)
 
-		//close channels
-		close(sourceChan)
-		close(rawMsgChan)
-		close(cacheOutChan)
-		close(cacheInChan)
-		close(transformedMsgChan)
-		close(resultChan)
+		cancel()
 
 		//close service components
 		_ = kafkaClient.Close()
@@ -82,21 +84,28 @@ func main() {
 	}()
 
 	if err := g.Wait(); err != nil {
-		log.Println("pipeline stopped: ", err)
+		logger.Error("pipeline stopped: ", "error", err)
 	}
 }
 
-func generator(sourceChan chan string) {
+func generator(ctx context.Context, sourceChan chan string) error {
+	logger := log.LoggerFrom(ctx)
 	i := 1
 	for {
-		log.Printf("generate message %06d", i)
-		sourceChan <- fmt.Sprintf("message%06d", i)
+		msg := fmt.Sprintf("generate [message%06d]", i)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case sourceChan <- fmt.Sprintf("[message%06d]", i):
+			logger.Info("sourceChan<-", "msg", msg)
+		}
 		time.Sleep(500 * time.Millisecond)
 		i++
 	}
 }
 
 func result(ctx context.Context, resultChan chan string) error {
+	logger := log.LoggerFrom(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -105,7 +114,7 @@ func result(ctx context.Context, resultChan chan string) error {
 			if !ok {
 				return nil
 			}
-			fmt.Printf("received message %s", msg)
+			logger.Info("<-resultChan", "msg", msg)
 		}
 	}
 }
